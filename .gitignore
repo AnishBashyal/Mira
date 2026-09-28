@@ -1,4 +1,7 @@
 .env
+AI.md
+credentials.json
+token.json
 .venv/
 venv/
 __pycache__/
