@@ -2,6 +2,9 @@
 AI.md
 credentials.json
 token.json
+browser_state.json
+browser_profile/
+screenshots/
 .venv/
 venv/
 __pycache__/

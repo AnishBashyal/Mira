@@ -48,9 +48,18 @@ def list_upcoming_events(max_results=10):
     return result.get("items", [])
 
 
-def create_test_event(summary):
+def create_test_event(summary, when=""):
     tz = ZoneInfo("America/Chicago")
-    start = (datetime.now(tz) + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)
+    if when:
+        start = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=tz)
+        else:
+            start = start.astimezone(tz)
+    else:
+        start = (datetime.now(tz) + timedelta(days=1)).replace(
+            hour=15, minute=0, second=0, microsecond=0
+        )
     end = start + timedelta(hours=1)
     service = build("calendar", "v3", credentials=get_credentials())
     event = {
