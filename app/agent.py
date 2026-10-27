@@ -49,3 +49,20 @@ def route_message(body: str) -> dict:
         "title": (data.get("title") or "").strip(),
         "when": (data.get("when") or "").strip(),
     }
+
+
+def describe_calendar_screenshot(path) -> str:
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    uploaded = client.files.upload(file=str(path))
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=[
+            uploaded,
+            (
+                "This is a screenshot of Google Calendar. "
+                "List the visible events with their times and titles. "
+                "If none are visible, say so. Be short."
+            ),
+        ],
+    )
+    return (response.text or "").strip() or "No events visible in the screenshot."
