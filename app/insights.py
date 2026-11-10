@@ -101,9 +101,9 @@ def summarize_runs(limit: int = 200) -> dict:
     by_site.sort(key=lambda item: (-item["n"], item["site"]))
 
     highlights = [
-        "API calendar create is quick for me; screen calendar create still burns steps and times out.",
-        "I can finish some public multi-step pages (weather.gov). Search engines and big media sites often block me.",
-        "Direct article URLs (Wikipedia) work better for me than hunting through a search box.",
+        "Calendar screen runs are for side-by-side with API (same list/schedule tasks). API is fast; screen schedule still times out.",
+        "Screen web is the generalization track — public sites with no special API.",
+        "Direct pages (Wikipedia) and weather.gov can work. Search engines and big media sites often block me.",
         "College portals bounce me into login mid-run — I'm skipping those without a saved session.",
     ]
 
