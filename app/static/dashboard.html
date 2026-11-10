@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mira — what I'm seeing</title>
+  <title>Mira dashboard</title>
   <style>
     :root {
       --bg: #0f1419;
@@ -174,10 +174,10 @@
 </head>
 <body>
   <header>
-    <div class="brand">Mira <span>screen view</span></div>
+    <div class="brand">Mira <span>dashboard</span></div>
     <div class="tabs">
       <button class="tab active" data-tab="live">Live</button>
-      <button class="tab" data-tab="insights">My runs</button>
+      <button class="tab" data-tab="insights">Runs</button>
     </div>
     <div class="meta">
       <div class="status idle" id="status">idle</div>
@@ -187,16 +187,16 @@
 
   <main>
     <section class="panel active" id="live">
-      <div class="goal" id="goal">Send me a <strong>screen:</strong> task on WhatsApp and I'll show it here.</div>
+      <div class="goal" id="goal">Waiting for a <strong>screen:</strong> task from WhatsApp…</div>
       <div class="grid">
         <div class="card">
-          <h2>What I see</h2>
+          <h2>Browser</h2>
           <div class="screen" id="screen">
-            <div class="empty">Nothing running yet — screenshots show up once I start clicking.</div>
+            <div class="empty">No run yet. Screenshots show up here while the agent works.</div>
           </div>
         </div>
         <div class="card">
-          <h2>What I did</h2>
+          <h2>Actions</h2>
           <div class="steps" id="steps"></div>
         </div>
       </div>
@@ -204,19 +204,19 @@
 
     <section class="panel" id="insights">
       <p class="hint">
-        Stuff I've logged in <code>logs/runs.jsonl</code> — how often screen vs API worked, where I got stuck, recent runs.
+        From <code>logs/runs.jsonl</code>: success rates, failure modes, recent runs.
       </p>
       <div class="stats" id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0.75rem;margin:1rem 0"></div>
       <div class="card" style="min-height:auto;margin-bottom:1rem">
-        <h2>What I've noticed</h2>
+        <h2>Notes</h2>
         <ul id="highlights" style="margin:0;padding:0.85rem 1.25rem 1rem;color:var(--muted);line-height:1.45"></ul>
       </div>
       <div class="card" style="min-height:auto;margin-bottom:1rem">
-        <h2>Where I failed</h2>
+        <h2>Failures</h2>
         <div id="failures" style="padding:0.85rem 1rem 1rem;font-family:var(--mono);font-size:0.8rem;color:var(--muted)"></div>
       </div>
       <div class="card" style="min-height:auto">
-        <h2>Recent runs I've logged</h2>
+        <h2>Recent runs</h2>
         <div style="overflow:auto">
           <table>
             <thead>
@@ -375,10 +375,10 @@
 
         failures.innerHTML = (summary.failure_modes || [])
           .map((f) => `<div style="margin-bottom:0.35rem">${f.mode}: <span style="color:var(--text)">${f.n}</span></div>`)
-          .join("") || "No fails logged yet.";
+          .join("") || "No failures logged.";
 
         if (!rows.length) {
-          body.innerHTML = `<tr><td colspan="9" style="color:var(--muted)">I haven't logged any runs yet.</td></tr>`;
+          body.innerHTML = `<tr><td colspan="9" style="color:var(--muted)">No runs logged yet.</td></tr>`;
           return;
         }
         body.innerHTML = rows.slice().reverse().map((r) => `

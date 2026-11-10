@@ -1,4 +1,4 @@
-"""Thread-safe live feed for the screen view page."""
+"""Live event feed for the dashboard."""
 
 import queue
 import threading

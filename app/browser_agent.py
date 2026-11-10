@@ -100,7 +100,7 @@ def _editable_focused(page) -> bool:
 
 
 def _focus_editable_near(page, x: int, y: int) -> bool:
-    """Vision picks (x,y); resolve nearest real editable via elementFromPoint (site-agnostic)."""
+    """Find a nearby editable field after a vision click."""
     return bool(
         _safe_evaluate(
             page,
@@ -327,7 +327,7 @@ def _result(message: str, path: Path, outcome: str, steps: int, started: float, 
 
 
 def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
-    """Open url, chase goal by screenshot actions. Site-agnostic."""
+    """Open url and chase the goal with screenshot actions."""
     from app.cancel import cancelled
 
     history: list[str] = []

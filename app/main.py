@@ -503,8 +503,7 @@ async def whatsapp_webhook(
                 detail=f"{len(subjects)} messages",
             )
         elif action in {"web", "help"}:
-            # Web/browse tasks always use the screenshot agent (API cannot browse).
-            # No site-specific hardcoding — planner infers a public start URL when possible.
+            # Web tasks use the screenshot agent.
             clear_pending(From)
             plan = await asyncio.to_thread(plan_web_task, message)
             print(f"Web plan: {plan}")

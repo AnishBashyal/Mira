@@ -1,4 +1,4 @@
-"""Score a run from the task + what actually happened."""
+"""Simple scoring for a logged run."""
 
 
 def score_run(
