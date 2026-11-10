@@ -5,6 +5,9 @@ token.json
 browser_state.json
 browser_profile/
 screenshots/
+logs/
+docs/
+.cursor/
 .venv/
 venv/
 __pycache__/
@@ -12,5 +15,6 @@ __pycache__/
 .Python
 .DS_Store
 *.log
+*.pdf
 .idea/
 .vscode/
