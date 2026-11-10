@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mira — what I'm seeing</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --border: #2c3845;
+      --text: #e7eef5;
+      --muted: #8b9aab;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --bad: #f07178;
+      --warn: #e6c07b;
+      --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a3a 0%, var(--bg) 55%);
+      color: var(--text);
+      font-family: var(--sans);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 20, 25, 0.85);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .brand { font-weight: 650; letter-spacing: 0.02em; }
+    .brand span { color: var(--accent); }
+    .tabs { display: flex; gap: 0.35rem; }
+    .tab {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      padding: 0.4rem 0.85rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .tab.active {
+      color: var(--text);
+      border-color: var(--accent);
+      background: rgba(61, 156, 240, 0.12);
+    }
+    .meta {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+    .timer { color: var(--accent); font-variant-numeric: tabular-nums; }
+    .status { text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.75rem; }
+    .status.running { color: var(--warn); }
+    .status.done { color: var(--ok); }
+    .status.fail, .status.timeout { color: var(--bad); }
+    .status.idle { color: var(--muted); }
+    main { padding: 1rem 1.25rem 2rem; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .goal {
+      margin-bottom: 0.85rem;
+      padding: 0.75rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .goal strong { color: var(--text); font-weight: 560; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 1rem;
+      min-height: 70vh;
+    }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 420px;
+    }
+    .card h2 {
+      margin: 0;
+      padding: 0.7rem 1rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .screen {
+      flex: 1;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .screen img {
+      max-width: 100%;
+      max-height: calc(70vh - 2.5rem);
+      object-fit: contain;
+    }
+    .screen .empty {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      padding: 2rem;
+      text-align: center;
+    }
+    .steps {
+      flex: 1;
+      overflow: auto;
+      padding: 0.5rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+    .step {
+      padding: 0.65rem 0.75rem;
+      border-radius: 8px;
+      margin-bottom: 0.4rem;
+      background: rgba(255,255,255,0.03);
+      border-left: 3px solid var(--border);
+    }
+    .step.click { border-left-color: var(--accent); }
+    .step.type { border-left-color: var(--ok); }
+    .step.press { border-left-color: var(--warn); }
+    .step.done { border-left-color: var(--ok); }
+    .step.fail, .step.timeout { border-left-color: var(--bad); }
+    .step .n { color: var(--muted); }
+    .step .a { color: var(--text); font-weight: 600; }
+    .step .r { color: var(--muted); margin-top: 0.25rem; }
+    .hint {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      max-width: 42rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Mira <span>screen view</span></div>
+    <div class="tabs">
+      <button class="tab active" data-tab="live">Live</button>
+      <button class="tab" data-tab="insights">My runs</button>
+    </div>
+    <div class="meta">
+      <div class="status idle" id="status">idle</div>
+      <div class="timer" id="timer">00:00.0</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel active" id="live">
+      <div class="goal" id="goal">Send me a <strong>screen:</strong> task on WhatsApp and I'll show it here.</div>
+      <div class="grid">
+        <div class="card">
+          <h2>What I see</h2>
+          <div class="screen" id="screen">
+            <div class="empty">Nothing running yet — screenshots show up once I start clicking.</div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>What I did</h2>
+          <div class="steps" id="steps"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="insights">
+      <p class="hint">
+        Stuff I've logged in <code>logs/runs.jsonl</code> — how often screen vs API worked, where I got stuck, recent runs.
+      </p>
+      <div class="stats" id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0.75rem;margin:1rem 0"></div>
+      <div class="card" style="min-height:auto;margin-bottom:1rem">
+        <h2>What I've noticed</h2>
+        <ul id="highlights" style="margin:0;padding:0.85rem 1.25rem 1rem;color:var(--muted);line-height:1.45"></ul>
+      </div>
+      <div class="card" style="min-height:auto;margin-bottom:1rem">
+        <h2>Where I failed</h2>
+        <div id="failures" style="padding:0.85rem 1rem 1rem;font-family:var(--mono);font-size:0.8rem;color:var(--muted)"></div>
+      </div>
+      <div class="card" style="min-height:auto">
+        <h2>Recent runs I've logged</h2>
+        <div style="overflow:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Mode</th>
+                <th>Task</th>
+                <th>Site</th>
+                <th>Outcome</th>
+                <th>Sec</th>
+                <th>Depth</th>
+                <th>Score</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="runs-body">
+              <tr><td colspan="9" style="color:var(--muted)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const timerEl = document.getElementById("timer");
+    const goalEl = document.getElementById("goal");
+    const screenEl = document.getElementById("screen");
+    const stepsEl = document.getElementById("steps");
+    let runStarted = null;
+    let tickHandle = null;
+
+    document.querySelectorAll(".tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById(btn.dataset.tab).classList.add("active");
+        if (btn.dataset.tab === "insights") loadRuns();
+      });
+    });
+
+    function formatElapsed(ms) {
+      const total = Math.max(0, ms / 1000);
+      const m = Math.floor(total / 60);
+      const s = total % 60;
+      return `${String(m).padStart(2, "0")}:${s.toFixed(1).padStart(4, "0")}`;
+    }
+
+    function setStatus(value) {
+      statusEl.textContent = value;
+      statusEl.className = "status " + value;
+    }
+
+    function startTimer(iso) {
+      runStarted = iso ? Date.parse(iso) : Date.now();
+      if (tickHandle) clearInterval(tickHandle);
+      tickHandle = setInterval(() => {
+        timerEl.textContent = formatElapsed(Date.now() - runStarted);
+      }, 100);
+    }
+
+    function stopTimer(seconds) {
+      if (tickHandle) clearInterval(tickHandle);
+      if (typeof seconds === "number") {
+        timerEl.textContent = formatElapsed(seconds * 1000);
+      }
+    }
+
+    function showShot(url) {
+      if (!url) return;
+      screenEl.innerHTML = "";
+      const img = document.createElement("img");
+      img.src = url + "?t=" + Date.now();
+      img.alt = "Agent screenshot";
+      screenEl.appendChild(img);
+    }
+
+    function addStep(event) {
+      const row = document.createElement("div");
+      const action = event.action || event.outcome || "info";
+      row.className = "step " + action;
+      const reason = event.reason || event.message || "";
+      row.innerHTML = `
+        <div><span class="n">#${event.step ?? "–"}</span>
+        <span class="a">${action}</span>
+        ${event.elapsed != null ? `<span class="n"> · ${event.elapsed}s</span>` : ""}</div>
+        ${reason ? `<div class="r">${reason}</div>` : ""}
+      `;
+      stepsEl.prepend(row);
+    }
+
+    function onEvent(event) {
+      if (event.type === "run_start") {
+        stepsEl.innerHTML = "";
+        setStatus("running");
+        startTimer(event.started_at);
+        goalEl.innerHTML = `<strong>Goal</strong> · ${event.goal || ""}<br/><strong>URL</strong> · ${event.url || ""}`;
+      } else if (event.type === "step") {
+        setStatus("running");
+        if (!runStarted) startTimer(event.started_at);
+        showShot(event.screenshot_url);
+        addStep(event);
+      } else if (event.type === "run_end") {
+        setStatus(event.outcome || "done");
+        stopTimer(event.seconds);
+        showShot(event.screenshot_url);
+        addStep({
+          step: event.steps,
+          action: event.outcome,
+          reason: event.message,
+          elapsed: event.seconds,
+        });
+      }
+    }
+
+    const source = new EventSource("/dashboard/stream");
+    source.onmessage = (msg) => {
+      try { onEvent(JSON.parse(msg.data)); }
+      catch (err) { console.error(err); }
+    };
+
+    function statCard(label, value) {
+      return `<div class="card" style="min-height:auto;padding:0.85rem 1rem">
+        <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted)">${label}</div>
+        <div style="font-family:var(--mono);font-size:1.25rem;margin-top:0.35rem">${value}</div>
+      </div>`;
+    }
+
+    async function loadRuns() {
+      const body = document.getElementById("runs-body");
+      const stats = document.getElementById("stats");
+      const highlights = document.getElementById("highlights");
+      const failures = document.getElementById("failures");
+      try {
+        const [rows, summary] = await Promise.all([
+          fetch("/dashboard/runs").then((r) => r.json()),
+          fetch("/dashboard/summary").then((r) => r.json()),
+        ]);
+
+        const api = summary.by_mode?.api || {};
+        const screen = summary.by_mode?.screen || {};
+        stats.innerHTML = [
+          statCard("Total runs", summary.n ?? 0),
+          statCard("API success", `${api.ok ?? 0}/${api.n ?? 0} (${Math.round((api.success_rate || 0) * 100)}%)`),
+          statCard("Screen success", `${screen.ok ?? 0}/${screen.n ?? 0} (${Math.round((screen.success_rate || 0) * 100)}%)`),
+          statCard("API avg sec", api.avg_seconds ?? "–"),
+          statCard("Screen avg sec", screen.avg_seconds ?? "–"),
+          statCard("Screen avg depth", screen.avg_depth ?? "–"),
+        ].join("");
+
+        highlights.innerHTML = (summary.highlights || [])
+          .map((h) => `<li style="margin-bottom:0.35rem">${h}</li>`)
+          .join("");
+
+        failures.innerHTML = (summary.failure_modes || [])
+          .map((f) => `<div style="margin-bottom:0.35rem">${f.mode}: <span style="color:var(--text)">${f.n}</span></div>`)
+          .join("") || "No fails logged yet.";
+
+        if (!rows.length) {
+          body.innerHTML = `<tr><td colspan="9" style="color:var(--muted)">I haven't logged any runs yet.</td></tr>`;
+          return;
+        }
+        body.innerHTML = rows.slice().reverse().map((r) => `
+          <tr>
+            <td>${(r.time || "").replace("T", " ").slice(0, 19)}</td>
+            <td>${r.mode || ""}</td>
+            <td>${r.task_class || r.task || ""}</td>
+            <td>${r.site || (r.task === "schedule" || r.task === "list" ? "calendar" : "")}</td>
+            <td>${r.outcome || ""}</td>
+            <td>${r.seconds ?? ""}</td>
+            <td>${r.action_depth ?? r.steps ?? ""}</td>
+            <td>${r.success_score ?? ""}</td>
+            <td>${(r.detail || r.error || "").toString().slice(0, 64)}</td>
+          </tr>
+        `).join("");
+      } catch (err) {
+        body.innerHTML = `<tr><td colspan="9" style="color:var(--bad)">Could not load runs.</td></tr>`;
+      }
+    }
+  </script>
+</body>
+</html>
