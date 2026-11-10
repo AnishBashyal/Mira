@@ -1,36 +1,26 @@
 from pathlib import Path
 from uuid import uuid4
 
-from playwright.sync_api import sync_playwright
+from app.browser import open_page
 
 ROOT = Path(__file__).resolve().parent.parent
-STATE_FILE = ROOT / "browser_state.json"
 SCREENSHOT_DIR = ROOT / "screenshots"
+CALENDAR_WEEK_URL = "https://calendar.google.com/calendar/u/0/r/week"
 
 
-def _capture(url: str, prefix: str) -> Path:
-    if not STATE_FILE.exists():
-        raise FileNotFoundError("Run python -m app.browser_login first.")
-
+def capture_page_screenshot(url: str, prefix: str = "page") -> Path:
     SCREENSHOT_DIR.mkdir(exist_ok=True)
     path = SCREENSHOT_DIR / f"{prefix}-{uuid4().hex}.png"
-
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel="chrome", headless=True)
-        context = browser.new_context(storage_state=str(STATE_FILE))
-        page = context.new_page()
+    with open_page() as page:
         page.goto(url, wait_until="domcontentloaded")
         page.wait_for_timeout(3000)
         page.screenshot(path=str(path), full_page=True)
-        context.close()
-        browser.close()
-
     return path
 
 
 def capture_event_screenshot(event_url: str) -> Path:
-    return _capture(event_url, "event")
+    return capture_page_screenshot(event_url, "event")
 
 
 def capture_calendar_screenshot() -> Path:
-    return _capture("https://calendar.google.com/calendar/u/0/r/week", "calendar")
+    return capture_page_screenshot(CALENDAR_WEEK_URL, "calendar")

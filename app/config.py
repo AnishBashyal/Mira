@@ -11,3 +11,6 @@ TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238
 TWILIO_CONTENT_SID = os.getenv("TWILIO_CONTENT_SID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://viral-waged-helmet.ngrok-free.dev").rstrip("/")
+# Headed Chrome can steal/lose OS focus and break typing. Dashboard shows shots instead.
+# Set SCREEN_HEADED=1 only if you want a visible Chrome window.
+SCREEN_HEADED = os.getenv("SCREEN_HEADED", "0").strip().lower() in {"1", "true", "yes"}
