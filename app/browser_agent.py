@@ -344,6 +344,20 @@ def _elapsed(started: float) -> float:
     return round(time.perf_counter() - started, 2)
 
 
+def _wait(page, ms: int, cancel=None) -> bool:
+    """Wait in short slices so stop/cancel can land mid-step. True if cancelled."""
+    from app.cancel import cancelled
+
+    left = max(0, int(ms))
+    while left > 0:
+        if cancelled(cancel):
+            return True
+        slice_ms = min(250, left)
+        page.wait_for_timeout(slice_ms)
+        left -= slice_ms
+    return cancelled(cancel)
+
+
 def _shot_url(path: Path) -> str:
     return f"/screenshots/{path.name}"
 
@@ -417,16 +431,20 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
             page.wait_for_load_state("networkidle", timeout=8000)
         except Exception:
             pass
-        page.wait_for_timeout(800)
+        if _wait(page, 800, cancel):
+            shot = _shot(page, "ui-cancelled")
+            return _result("Stopped.", shot, "cancelled", 0, started, actions)
         # Clear transient overlays that steal focus without being site-specific.
         page.keyboard.press("Escape")
-        page.wait_for_timeout(200)
+        if _wait(page, 200, cancel):
+            shot = _shot(page, "ui-cancelled")
+            return _result("Stopped.", shot, "cancelled", 0, started, actions)
 
         for step in range(1, MAX_STEPS + 1):
             if cancelled(cancel):
                 shot = _shot(page, "ui-cancelled")
                 print("Screen run cancelled by user")
-                return _result("Stopped by user.", shot, "cancelled", step - 1, started, actions)
+                return _result("Stopped.", shot, "cancelled", step - 1, started, actions)
 
             shot = _shot(page, f"ui-step{step}")
             digest = _shot_digest(shot)
@@ -528,7 +546,8 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                     "pick coordinates inside the screenshot"
                 )
                 last_action = "click"
-                page.wait_for_timeout(400)
+                if _wait(page, 400, cancel):
+                    return _result("Stopped.", shot, "cancelled", step, started, actions)
                 continue
 
             if action == "click":
@@ -555,7 +574,8 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                     )
                     print(f"Click missed editable focus at ({x}, {y})")
                 last_action = "click"
-                page.wait_for_timeout(500)
+                if _wait(page, 500, cancel):
+                    return _result("Stopped.", shot, "cancelled", step, started, actions)
                 continue
 
             if action == "type":
@@ -576,7 +596,8 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                     )
                     print("Type skipped: no editable focused")
                     last_action = "type"
-                    page.wait_for_timeout(400)
+                    if _wait(page, 400, cancel):
+                        return _result("Stopped.", shot, "cancelled", step, started, actions)
                     continue
                 typed = _type_into_focused(page, decision["text"])
                 if typed:
@@ -589,7 +610,8 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                     )
                     print(f"Type failed to land: {decision['text'][:40]!r}")
                 last_action = "type"
-                page.wait_for_timeout(800)
+                if _wait(page, 800, cancel):
+                    return _result("Stopped.", shot, "cancelled", step, started, actions)
                 continue
 
             click_streak = 0
@@ -601,9 +623,11 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
             elif action == "scroll":
                 page.mouse.wheel(0, 600)
             elif action == "wait":
-                page.wait_for_timeout(1500)
+                if _wait(page, 1500, cancel):
+                    return _result("Stopped.", shot, "cancelled", step, started, actions)
             last_action = action
-            page.wait_for_timeout(1200)
+            if _wait(page, 1200, cancel):
+                return _result("Stopped.", shot, "cancelled", step, started, actions)
 
         final_path = _shot(page, "ui-timeout")
         return _result("Stopped after max steps.", final_path, "timeout", step, started, actions)

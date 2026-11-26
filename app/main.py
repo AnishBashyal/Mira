@@ -121,6 +121,42 @@ def send_whatsapp(to: str, body: str, media_url: str | None = None):
     print(f"Sent WhatsApp sid={message.sid} status={message.status}")
 
 
+def screen_status(kind: str, detail: str = "") -> str:
+    tip = " Reply stop to cancel."
+    if kind == "list":
+        return "Looking at your calendar on screen..." + tip
+    if kind == "schedule":
+        label = detail.strip() or "that event"
+        return f"Creating {label} on screen..." + tip
+    if kind == "web":
+        return "Working on that on screen..." + tip
+    return "Working on screen..." + tip
+
+
+def format_screen_reply(outcome: str, raw: str, *, title: str = "", goal: str = "") -> str:
+    if outcome == "cancelled":
+        return "Stopped."
+    if outcome == "done":
+        if title:
+            return f"Created {title} on screen."
+        return (raw or "Done.").strip()
+    if outcome == "timeout":
+        if title:
+            return f"Couldn't finish creating {title} on screen — ran out of steps."
+        return "Couldn't finish on screen — ran out of steps."
+    text = (raw or "").strip()
+    lower = text.lower()
+    if "too many clicks" in lower or "click streak" in lower:
+        return "Got stuck clicking around and stopped."
+    if "no visible change" in lower:
+        return "Clicks weren't changing the page, so I stopped."
+    if "repeated" in lower or "action sequence" in lower:
+        return "Kept repeating the same moves, so I stopped."
+    if text.startswith("Failed:"):
+        return text.replace("Failed:", "Couldn't finish:", 1)
+    return text or "Screen task failed."
+
+
 async def screen_list_and_reply(to: str):
     started = time.perf_counter()
     try:
@@ -150,7 +186,7 @@ async def screen_list_and_reply(to: str):
             error=str(error),
         )
         print(error)
-        await asyncio.to_thread(send_whatsapp, to, "Screen calendar request failed.")
+        await asyncio.to_thread(send_whatsapp, to, "Couldn't read the calendar on screen.")
 
 
 async def screen_schedule_and_reply(to: str, title: str, when: str):
@@ -161,8 +197,11 @@ async def screen_schedule_and_reply(to: str, title: str, when: str):
         result = await asyncio.to_thread(run_ui_goal, CALENDAR_WEEK_URL, goal, cancel)
         path = result["screenshot"]
         media_url = f"{PUBLIC_BASE_URL}/screenshots/{path.name}"
+        reply_text = format_screen_reply(
+            result["outcome"], result["message"], title=title, goal=goal
+        )
         print(f"Screenshot: {media_url}")
-        print(result["message"])
+        print(reply_text)
         log_run(
             mode="screen",
             task="schedule",
@@ -173,9 +212,9 @@ async def screen_schedule_and_reply(to: str, title: str, when: str):
             seconds=result["seconds"],
             steps=result["steps"],
             actions=result["actions"],
-            detail=result["message"],
+            detail=reply_text,
         )
-        await asyncio.to_thread(send_whatsapp, to, result["message"], media_url)
+        await asyncio.to_thread(send_whatsapp, to, reply_text, media_url)
     except Exception as error:
         log_run(
             mode="screen",
@@ -187,7 +226,7 @@ async def screen_schedule_and_reply(to: str, title: str, when: str):
             error=str(error),
         )
         print(error)
-        await asyncio.to_thread(send_whatsapp, to, "Screen schedule request failed.")
+        await asyncio.to_thread(send_whatsapp, to, "Couldn't create that on screen.")
     finally:
         clear_run(to)
 
@@ -199,12 +238,15 @@ async def screen_web_and_reply(to: str, url: str, goal: str, task_class: str = "
         result = await asyncio.to_thread(run_ui_goal, url, goal, cancel)
         path = result["screenshot"]
         media_url = f"{PUBLIC_BASE_URL}/screenshots/{path.name}"
-        if result["outcome"] in {"done", "timeout"}:
+        if result["outcome"] == "done":
             reply_text = await asyncio.to_thread(answer_from_screenshot, path, goal)
+        elif result["outcome"] == "timeout":
+            answer = await asyncio.to_thread(answer_from_screenshot, path, goal)
+            reply_text = f"{answer} (stopped after max steps)"
         elif result["outcome"] == "cancelled":
             reply_text = "Stopped."
         else:
-            reply_text = result["message"]
+            reply_text = format_screen_reply(result["outcome"], result["message"], goal=goal)
         print(f"Screenshot: {media_url}")
         print(reply_text)
         log_run(
@@ -233,7 +275,7 @@ async def screen_web_and_reply(to: str, url: str, goal: str, task_class: str = "
             url=url,
         )
         print(error)
-        await asyncio.to_thread(send_whatsapp, to, "Screen web task failed.")
+        await asyncio.to_thread(send_whatsapp, to, "Couldn't finish that on screen.")
     finally:
         clear_run(to)
 
@@ -356,7 +398,7 @@ async def whatsapp_webhook(
         if is_stop_message(message):
             clear_pending(From)
             if request_cancel(From):
-                text = "Stopping the current screen task..."
+                text = "Stopping… I'll reply when it ends."
             else:
                 text = "Nothing running to stop."
             print(text)
@@ -379,7 +421,7 @@ async def whatsapp_webhook(
                     ready.goal,
                     ready.task_class,
                 )
-                text = "On it..."
+                text = screen_status("web")
             print(text)
             reply = MessagingResponse()
             reply.message(text)
@@ -410,7 +452,7 @@ async def whatsapp_webhook(
                     background_tasks.add_task(
                         screen_schedule_and_reply, From, ready.title, ready.when
                     )
-                    text = "Creating that on screen..."
+                    text = screen_status("schedule", ready.title)
                 else:
                     started = time.perf_counter()
                     event = await asyncio.to_thread(create_test_event, ready.title, ready.when)
@@ -442,7 +484,7 @@ async def whatsapp_webhook(
         if action == "list" and mode == "screen":
             clear_pending(From)
             background_tasks.add_task(screen_list_and_reply, From)
-            text = "Checking your calendar..."
+            text = screen_status("list")
         elif action == "list":
             clear_pending(From)
             started = time.perf_counter()
@@ -467,7 +509,7 @@ async def whatsapp_webhook(
                     background_tasks.add_task(
                         screen_schedule_and_reply, From, ready.title, ready.when
                     )
-                    text = "Creating that on screen..."
+                    text = screen_status("schedule", ready.title)
                 else:
                     started = time.perf_counter()
                     event = await asyncio.to_thread(create_test_event, ready.title, ready.when)
@@ -518,7 +560,7 @@ async def whatsapp_webhook(
                     ready.goal,
                     ready.task_class,
                 )
-                text = "On it..."
+                text = screen_status("web")
             else:
                 text = "Tell me what you need — calendar, mail, or a web task."
         else:
