@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from pathlib import Path
 
 from app.runs import read_runs
 from app.score import score_run
@@ -26,93 +25,153 @@ def _ok(row: dict) -> bool:
     return row.get("outcome") in {"ok", "done"} or float(row.get("success_score") or 0) >= 1.0
 
 
+def _site_for(row: dict) -> str:
+    if row.get("site"):
+        return str(row["site"])
+    if row.get("task") in {"list", "schedule", "mail"}:
+        return "calendar" if row.get("task") != "mail" else "gmail"
+    return "other"
+
+
+def _bucket_stats(rows: list[dict]) -> dict:
+    n = len(rows)
+    if not n:
+        return {
+            "n": 0,
+            "ok": 0,
+            "success_rate": 0,
+            "avg_seconds": None,
+            "avg_depth": None,
+            "avg_success_score": 0,
+        }
+    ok = sum(1 for row in rows if _ok(row))
+    seconds = [float(row["seconds"]) for row in rows if row.get("seconds") is not None]
+    depths = [
+        int(row.get("action_depth", row.get("steps") or 0))
+        for row in rows
+        if row.get("action_depth") is not None or row.get("steps") is not None
+    ]
+    scores = [float(row.get("success_score") or 0) for row in rows]
+    return {
+        "n": n,
+        "ok": ok,
+        "success_rate": round(ok / n, 2),
+        "avg_seconds": round(sum(seconds) / len(seconds), 1) if seconds else None,
+        "avg_depth": round(sum(depths) / len(depths), 1) if depths else None,
+        "avg_success_score": round(sum(scores) / len(scores), 2) if scores else 0,
+    }
+
+
+def _fail_mode(row: dict) -> str:
+    detail = (row.get("detail") or row.get("error") or row.get("outcome") or "").lower()
+    if "bot" in detail or "verification" in detail or "403" in detail or "forbidden" in detail:
+        return "bot_or_block"
+    if "focus" in detail or "text field" in detail or "non-interactive" in detail:
+        return "focus_or_input"
+    if "execution context" in detail or "navigation" in detail:
+        return "navigation_redirect"
+    if "timeout" in detail or row.get("outcome") == "timeout":
+        return "timeout_wander"
+    return "other"
+
+
 def summarize_runs(limit: int = 200) -> dict:
     rows = [_enriched(r) for r in read_runs(limit)]
     if not rows:
-        return {"n": 0, "by_mode": {}, "by_site": [], "failure_modes": [], "highlights": []}
-
-    by_mode: dict[str, dict] = {}
-    for row in rows:
-        mode = row.get("mode") or "unknown"
-        bucket = by_mode.setdefault(
-            mode,
-            {"n": 0, "ok": 0, "seconds": [], "depths": [], "scores": []},
-        )
-        bucket["n"] += 1
-        if _ok(row):
-            bucket["ok"] += 1
-        if row.get("seconds") is not None:
-            bucket["seconds"].append(float(row["seconds"]))
-        depth = row.get("action_depth", row.get("steps"))
-        if depth is not None:
-            bucket["depths"].append(int(depth))
-        bucket["scores"].append(float(row.get("success_score") or 0))
-
-    mode_summary = {}
-    for mode, bucket in by_mode.items():
-        n = bucket["n"]
-        mode_summary[mode] = {
-            "n": n,
-            "ok": bucket["ok"],
-            "success_rate": round(bucket["ok"] / n, 2) if n else 0,
-            "avg_seconds": round(sum(bucket["seconds"]) / len(bucket["seconds"]), 1)
-            if bucket["seconds"]
-            else None,
-            "avg_depth": round(sum(bucket["depths"]) / len(bucket["depths"]), 1)
-            if bucket["depths"]
-            else None,
-            "avg_success_score": round(sum(bucket["scores"]) / len(bucket["scores"]), 2)
-            if bucket["scores"]
-            else 0,
+        return {
+            "n": 0,
+            "by_mode": {},
+            "by_site": [],
+            "calendar_compare": [],
+            "web_summary": {},
+            "failure_modes": [],
+            "highlights": [],
         }
 
-    site_counter: Counter[str] = Counter()
-    site_ok: Counter[str] = Counter()
-    fail_reasons: Counter[str] = Counter()
+    by_mode_rows: dict[str, list[dict]] = {}
     for row in rows:
-        site = row.get("site") or (
-            "calendar" if row.get("task") in {"list", "schedule"} else "other"
-        )
-        site_counter[site] += 1
-        if _ok(row):
-            site_ok[site] += 1
-        if not _ok(row):
-            detail = (row.get("detail") or row.get("error") or row.get("outcome") or "").lower()
-            if "bot" in detail or "verification" in detail or "403" in detail or "forbidden" in detail:
-                fail_reasons["bot_or_block"] += 1
-            elif "focus" in detail or "text field" in detail or "non-interactive" in detail:
-                fail_reasons["focus_or_input"] += 1
-            elif "execution context" in detail or "navigation" in detail:
-                fail_reasons["navigation_redirect"] += 1
-            elif "timeout" in detail or row.get("outcome") == "timeout":
-                fail_reasons["timeout_wander"] += 1
-            else:
-                fail_reasons["other"] += 1
+        by_mode_rows.setdefault(row.get("mode") or "unknown", []).append(row)
+    mode_summary = {mode: _bucket_stats(group) for mode, group in by_mode_rows.items()}
 
+    site_rows: dict[str, list[dict]] = {}
+    for row in rows:
+        site_rows.setdefault(_site_for(row), []).append(row)
     by_site = [
-        {
-            "site": site,
-            "n": site_counter[site],
-            "ok": site_ok[site],
-            "success_rate": round(site_ok[site] / site_counter[site], 2),
-        }
-        for site in site_counter
+        {"site": site, **_bucket_stats(group)}
+        for site, group in site_rows.items()
     ]
     by_site.sort(key=lambda item: (-item["n"], item["site"]))
 
-    highlights = [
-        "Calendar screen is compared with API list/schedule. API is fast; screen schedule often times out.",
-        "Screen web is for general sites (no special API).",
-        "Direct pages (Wikipedia) and weather.gov can work. Search engines and some media sites block the agent.",
-        "College portals redirect into login mid-run. Skip those without a saved browser session.",
+    # Side-by-side Calendar: list + schedule for api vs screen
+    calendar_compare = []
+    for task in ("list", "schedule"):
+        row = {"task": task}
+        for mode in ("api", "screen"):
+            group = [
+                r for r in rows
+                if r.get("mode") == mode and r.get("task") == task
+            ]
+            row[mode] = _bucket_stats(group)
+        calendar_compare.append(row)
+
+    web_only = [r for r in rows if r.get("task") == "web"]
+    web_summary = _bucket_stats(web_only)
+
+    fail_reasons: Counter[str] = Counter()
+    for row in rows:
+        if not _ok(row):
+            fail_reasons[_fail_mode(row)] += 1
+    fail_total = sum(fail_reasons.values()) or 1
+    failure_modes = [
+        {
+            "mode": name,
+            "n": count,
+            "pct": round(100 * count / fail_total),
+        }
+        for name, count in fail_reasons.most_common()
     ]
+
+    api = mode_summary.get("api", {})
+    screen = mode_summary.get("screen", {})
+    highlights = []
+    if api.get("n") or screen.get("n"):
+        highlights.append(
+            f"Overall: API {api.get('ok', 0)}/{api.get('n', 0)} ok "
+            f"(avg {api.get('avg_seconds') or '–'}s); "
+            f"screen {screen.get('ok', 0)}/{screen.get('n', 0)} ok "
+            f"(avg {screen.get('avg_seconds') or '–'}s)."
+        )
+    list_api = next((c["api"] for c in calendar_compare if c["task"] == "list"), {})
+    list_screen = next((c["screen"] for c in calendar_compare if c["task"] == "list"), {})
+    sched_api = next((c["api"] for c in calendar_compare if c["task"] == "schedule"), {})
+    sched_screen = next((c["screen"] for c in calendar_compare if c["task"] == "schedule"), {})
+    if list_api.get("n") or list_screen.get("n"):
+        highlights.append(
+            f"Calendar list: API avg {list_api.get('avg_seconds') or '–'}s; "
+            f"screen avg {list_screen.get('avg_seconds') or '–'}s."
+        )
+    if sched_api.get("n") or sched_screen.get("n"):
+        highlights.append(
+            f"Calendar schedule: API {sched_api.get('ok', 0)}/{sched_api.get('n', 0)} "
+            f"(~{sched_api.get('avg_seconds') or '–'}s); "
+            f"screen {sched_screen.get('ok', 0)}/{sched_screen.get('n', 0)} "
+            f"(~{sched_screen.get('avg_seconds') or '–'}s)."
+        )
+    if web_summary.get("n"):
+        highlights.append(
+            f"Screen web (generalization): {web_summary.get('ok', 0)}/{web_summary.get('n', 0)} ok, "
+            f"avg {web_summary.get('avg_seconds') or '–'}s."
+        )
+    if failure_modes:
+        top = ", ".join(f"{f['mode']} ({f['n']})" for f in failure_modes[:3])
+        highlights.append(f"Top failure modes: {top}.")
 
     return {
         "n": len(rows),
         "by_mode": mode_summary,
         "by_site": by_site,
-        "failure_modes": [
-            {"mode": name, "n": count} for name, count in fail_reasons.most_common()
-        ],
+        "calendar_compare": calendar_compare,
+        "web_summary": web_summary,
+        "failure_modes": failure_modes,
         "highlights": highlights,
     }

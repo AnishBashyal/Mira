@@ -204,9 +204,48 @@
 
     <section class="panel" id="insights">
       <p class="hint">
-        From <code>logs/runs.jsonl</code>: success rates, failure modes, recent runs.
+        From <code>logs/runs.jsonl</code>. Calendar rows are API vs screen side by side. Web rows are the general screen path.
       </p>
       <div class="stats" id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0.75rem;margin:1rem 0"></div>
+      <div class="card" style="min-height:auto;margin-bottom:1rem">
+        <h2>Calendar: API vs screen</h2>
+        <div style="overflow:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>API ok</th>
+                <th>API avg s</th>
+                <th>Screen ok</th>
+                <th>Screen avg s</th>
+                <th>Screen depth</th>
+              </tr>
+            </thead>
+            <tbody id="compare-body">
+              <tr><td colspan="6" style="color:var(--muted)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="min-height:auto;margin-bottom:1rem">
+        <h2>By site</h2>
+        <div style="overflow:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Site</th>
+                <th>Runs</th>
+                <th>Ok</th>
+                <th>Success</th>
+                <th>Avg s</th>
+              </tr>
+            </thead>
+            <tbody id="sites-body">
+              <tr><td colspan="5" style="color:var(--muted)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
       <div class="card" style="min-height:auto;margin-bottom:1rem">
         <h2>Notes</h2>
         <ul id="highlights" style="margin:0;padding:0.85rem 1.25rem 1rem;color:var(--muted);line-height:1.45"></ul>
@@ -347,11 +386,18 @@
       </div>`;
     }
 
+    function fmtRate(bucket) {
+      if (!bucket || !bucket.n) return "–";
+      return `${bucket.ok}/${bucket.n} (${Math.round((bucket.success_rate || 0) * 100)}%)`;
+    }
+
     async function loadRuns() {
       const body = document.getElementById("runs-body");
       const stats = document.getElementById("stats");
       const highlights = document.getElementById("highlights");
       const failures = document.getElementById("failures");
+      const compareBody = document.getElementById("compare-body");
+      const sitesBody = document.getElementById("sites-body");
       try {
         const [rows, summary] = await Promise.all([
           fetch("/dashboard/runs").then((r) => r.json()),
@@ -360,21 +406,60 @@
 
         const api = summary.by_mode?.api || {};
         const screen = summary.by_mode?.screen || {};
+        const web = summary.web_summary || {};
         stats.innerHTML = [
           statCard("Total runs", summary.n ?? 0),
-          statCard("API success", `${api.ok ?? 0}/${api.n ?? 0} (${Math.round((api.success_rate || 0) * 100)}%)`),
-          statCard("Screen success", `${screen.ok ?? 0}/${screen.n ?? 0} (${Math.round((screen.success_rate || 0) * 100)}%)`),
+          statCard("API success", fmtRate(api)),
+          statCard("Screen success", fmtRate(screen)),
           statCard("API avg sec", api.avg_seconds ?? "–"),
           statCard("Screen avg sec", screen.avg_seconds ?? "–"),
-          statCard("Screen avg depth", screen.avg_depth ?? "–"),
+          statCard("Web ok", fmtRate(web)),
         ].join("");
+
+        const compare = summary.calendar_compare || [];
+        compareBody.innerHTML = compare.length
+          ? compare.map((c) => `
+            <tr>
+              <td>${c.task}</td>
+              <td>${fmtRate(c.api)}</td>
+              <td>${c.api?.avg_seconds ?? "–"}</td>
+              <td>${fmtRate(c.screen)}</td>
+              <td>${c.screen?.avg_seconds ?? "–"}</td>
+              <td>${c.screen?.avg_depth ?? "–"}</td>
+            </tr>
+          `).join("")
+          : `<tr><td colspan="6" style="color:var(--muted)">No calendar runs yet.</td></tr>`;
+
+        const sites = summary.by_site || [];
+        sitesBody.innerHTML = sites.length
+          ? sites.map((s) => `
+            <tr>
+              <td>${s.site}</td>
+              <td>${s.n}</td>
+              <td>${s.ok}</td>
+              <td>${Math.round((s.success_rate || 0) * 100)}%</td>
+              <td>${s.avg_seconds ?? "–"}</td>
+            </tr>
+          `).join("")
+          : `<tr><td colspan="5" style="color:var(--muted)">No sites yet.</td></tr>`;
 
         highlights.innerHTML = (summary.highlights || [])
           .map((h) => `<li style="margin-bottom:0.35rem">${h}</li>`)
-          .join("");
+          .join("") || "<li>No notes yet.</li>";
 
         failures.innerHTML = (summary.failure_modes || [])
-          .map((f) => `<div style="margin-bottom:0.35rem">${f.mode}: <span style="color:var(--text)">${f.n}</span></div>`)
+          .map((f) => {
+            const pct = f.pct ?? 0;
+            return `<div style="margin-bottom:0.55rem">
+              <div style="display:flex;justify-content:space-between;gap:1rem;margin-bottom:0.2rem">
+                <span>${f.mode}</span>
+                <span style="color:var(--text)">${f.n} · ${pct}%</span>
+              </div>
+              <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:var(--bad)"></div>
+              </div>
+            </div>`;
+          })
           .join("") || "No failures logged.";
 
         if (!rows.length) {
@@ -385,8 +470,8 @@
           <tr>
             <td>${(r.time || "").replace("T", " ").slice(0, 19)}</td>
             <td>${r.mode || ""}</td>
-            <td>${r.task_class || r.task || ""}</td>
-            <td>${r.site || (r.task === "schedule" || r.task === "list" ? "calendar" : "")}</td>
+            <td>${r.task || r.task_class || ""}</td>
+            <td>${r.site || (r.task === "schedule" || r.task === "list" ? "calendar" : r.task === "mail" ? "gmail" : "")}</td>
             <td>${r.outcome || ""}</td>
             <td>${r.seconds ?? ""}</td>
             <td>${r.action_depth ?? r.steps ?? ""}</td>
