@@ -133,38 +133,57 @@ def summarize_runs(limit: int = 200) -> dict:
 
     api = mode_summary.get("api", {})
     screen = mode_summary.get("screen", {})
-    highlights = []
-    if api.get("n") or screen.get("n"):
-        highlights.append(
-            f"Overall: API {api.get('ok', 0)}/{api.get('n', 0)} ok "
-            f"(avg {api.get('avg_seconds') or '–'}s); "
-            f"screen {screen.get('ok', 0)}/{screen.get('n', 0)} ok "
-            f"(avg {screen.get('avg_seconds') or '–'}s)."
-        )
     list_api = next((c["api"] for c in calendar_compare if c["task"] == "list"), {})
     list_screen = next((c["screen"] for c in calendar_compare if c["task"] == "list"), {})
     sched_api = next((c["api"] for c in calendar_compare if c["task"] == "schedule"), {})
     sched_screen = next((c["screen"] for c in calendar_compare if c["task"] == "schedule"), {})
+
+    # Site-class split for web conclusions
+    web_rows = [r for r in rows if r.get("task") == "web"]
+    easy_sites = {"en.wikipedia.org", "www.weather.gov"}
+    hard_markers = ("google.", "duckduckgo.", "imdb.", "ellucian", "colleague")
+    easy = [r for r in web_rows if _site_for(r) in easy_sites]
+    hard = [
+        r for r in web_rows
+        if any(m in _site_for(r) for m in hard_markers)
+    ]
+    easy_stats = _bucket_stats(easy)
+    hard_stats = _bucket_stats(hard)
+
+    highlights = []
+    if api.get("n"):
+        highlights.append(
+            f"API path is reliable for everyday use: {api.get('ok', 0)}/{api.get('n', 0)} ok "
+            f"(avg {api.get('avg_seconds') or '–'}s)."
+        )
     if list_api.get("n") or list_screen.get("n"):
         highlights.append(
-            f"Calendar list: API avg {list_api.get('avg_seconds') or '–'}s; "
-            f"screen avg {list_screen.get('avg_seconds') or '–'}s."
+            f"Calendar list works both ways, but screen is slower "
+            f"(API ~{list_api.get('avg_seconds') or '–'}s vs screen ~{list_screen.get('avg_seconds') or '–'}s)."
         )
     if sched_api.get("n") or sched_screen.get("n"):
         highlights.append(
-            f"Calendar schedule: API {sched_api.get('ok', 0)}/{sched_api.get('n', 0)} "
+            f"Calendar create is the clear split: API {sched_api.get('ok', 0)}/{sched_api.get('n', 0)} "
             f"(~{sched_api.get('avg_seconds') or '–'}s); "
             f"screen {sched_screen.get('ok', 0)}/{sched_screen.get('n', 0)} "
-            f"(~{sched_screen.get('avg_seconds') or '–'}s)."
+            f"(~{sched_screen.get('avg_seconds') or '–'}s). Dense forms still beat pixel clicks."
         )
-    if web_summary.get("n"):
+    if easy_stats.get("n") or hard_stats.get("n"):
         highlights.append(
-            f"Screen web (generalization): {web_summary.get('ok', 0)}/{web_summary.get('n', 0)} ok, "
-            f"avg {web_summary.get('avg_seconds') or '–'}s."
+            f"Screen web: public pages like Wikipedia/weather.gov "
+            f"{easy_stats.get('ok', 0)}/{easy_stats.get('n', 0)} ok; "
+            f"search engines / blocked / login sites "
+            f"{hard_stats.get('ok', 0)}/{hard_stats.get('n', 0)} ok."
+        )
+    if screen.get("n") and api.get("n"):
+        highlights.append(
+            f"Overall screen success stays lower and slower "
+            f"({screen.get('ok', 0)}/{screen.get('n', 0)}, avg {screen.get('avg_seconds') or '–'}s) "
+            f"than API — use screen for research demos, API when it must work."
         )
     if failure_modes:
         top = ", ".join(f"{f['mode']} ({f['n']})" for f in failure_modes[:3])
-        highlights.append(f"Top failure modes: {top}.")
+        highlights.append(f"Main failure modes: {top}.")
 
     return {
         "n": len(rows),
