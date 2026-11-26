@@ -18,6 +18,10 @@ MAX_STEPS = 16
 REPEAT_LIMIT = 3
 CYCLE_LEN = 3
 CLICK_GRID = 40
+# Many slightly different clicks can burn the budget without exact signature repeats.
+CLICK_STREAK_WARN = 4
+CLICK_STREAK_FAIL = 7
+NO_CHANGE_CLICK_FAIL = 4
 
 CLICK_FOCUS_OFFSETS = (
     (0, 0),
@@ -48,6 +52,7 @@ Rules:
 - If history says a click missed the text field, click a clearly different spot inside the field.
 - If history says typing was skipped for no focus, click the field again before typing.
 - Do not repeat the same click or action if it already failed.
+- After several clicks with no typing, stop clicking around: focus a real text field and type, or press a clear Save/Next/Enter control.
 - done only when the goal is clearly finished because of actions in this run.
 - fail if you are stuck or the page blocks progress.
 Screenshot size is 1280x800.
@@ -146,8 +151,61 @@ def _focus_editable_near(page, x: int, y: int) -> bool:
     )
 
 
+def _focus_visible_editable(page, prefer_x: int | None = None, prefer_y: int | None = None) -> bool:
+    """Focus a visible editable on the page; prefer one near (x,y) when given."""
+    return bool(
+        _safe_evaluate(
+            page,
+            """([preferX, preferY]) => {
+              const badType = new Set(['button','submit','checkbox','radio','file','hidden','image','reset']);
+              const isEditable = (el) => {
+                if (!el || el.disabled) return false;
+                const tag = (el.tagName || '').toLowerCase();
+                if (tag === 'textarea') return true;
+                if (tag === 'input') {
+                  const type = (el.type || 'text').toLowerCase();
+                  return !badType.has(type);
+                }
+                if (el.isContentEditable) return true;
+                const role = (el.getAttribute('role') || '').toLowerCase();
+                return ['textbox','searchbox','combobox'].includes(role);
+              };
+              const nodes = Array.from(document.querySelectorAll(
+                'input, textarea, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]'
+              ));
+              const visible = [];
+              for (const el of nodes) {
+                if (!isEditable(el)) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width < 8 || r.height < 8) continue;
+                if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
+                const style = getComputedStyle(el);
+                if (style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') continue;
+                const cx = r.left + r.width / 2;
+                const cy = r.top + r.height / 2;
+                const dist = (preferX == null || preferY == null)
+                  ? 0
+                  : Math.hypot(cx - preferX, cy - preferY);
+                visible.push({ el, area: r.width * r.height, dist });
+              }
+              if (!visible.length) return false;
+              visible.sort((a, b) => {
+                if (preferX != null && preferY != null && a.dist !== b.dist) return a.dist - b.dist;
+                return b.area - a.area;
+              });
+              const hit = visible[0].el;
+              hit.scrollIntoView({block: 'center', inline: 'center'});
+              hit.focus({preventScroll: true});
+              hit.click();
+              return document.activeElement === hit || isEditable(document.activeElement);
+            }""",
+            [prefer_x, prefer_y],
+        )
+    )
+
+
 def _click_for_focus(page, x: int, y: int) -> bool:
-    """Prefer DOM-resolved editable near (x,y); fall back to mouse offsets."""
+    """Prefer DOM-resolved editable near (x,y); fall back to mouse offsets, then any visible field."""
     if _focus_editable_near(page, x, y):
         print(f"Focused editable near ({x}, {y}) via elementFromPoint")
         return True
@@ -161,6 +219,9 @@ def _click_for_focus(page, x: int, y: int) -> bool:
             if dx or dy:
                 print(f"Focused editable via offset ({dx}, {dy}) from ({x}, {y})")
             return True
+    if _focus_visible_editable(page, x, y):
+        print(f"Focused nearest visible editable to ({x}, {y})")
+        return True
     return False
 
 
@@ -336,6 +397,8 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
     prev_digest: str | None = None
     last_action = ""
     last_click: tuple[int, int] | None = None
+    click_streak = 0
+    no_change_clicks = 0
     started = time.perf_counter()
     step = 0
 
@@ -367,7 +430,7 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
 
             shot = _shot(page, f"ui-step{step}")
             digest = _shot_digest(shot)
-            progress = ""
+            progress_bits: list[str] = []
             # Focus changes often do not change pixels — only treat type/press/scroll
             # "no effect" as strong evidence of failure.
             if (
@@ -375,11 +438,30 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                 and digest == prev_digest
                 and last_action in {"type", "press", "scroll"}
             ):
-                progress = (
-                    "SYSTEM: previous action had no visible effect; "
-                    "try a different control."
+                progress_bits.append(
+                    "SYSTEM: previous action had no visible effect; try a different control."
                 )
                 print("No visible effect from previous action")
+            if last_action == "click" and prev_digest is not None and digest == prev_digest:
+                no_change_clicks += 1
+            elif last_action == "click":
+                no_change_clicks = 0
+            if no_change_clicks >= NO_CHANGE_CLICK_FAIL:
+                print(f"Stuck: {no_change_clicks} clicks with no visible change")
+                return _result(
+                    "Failed: many clicks with no visible change; stuck wandering the UI.",
+                    shot,
+                    "fail",
+                    step,
+                    started,
+                    actions,
+                )
+            if click_streak >= CLICK_STREAK_WARN:
+                progress_bits.append(
+                    f"SYSTEM: {click_streak} clicks in a row with little progress. "
+                    "Stop wandering. Click a text field and type, or use a clear primary button / Enter."
+                )
+            progress = ("\n".join(progress_bits) + "\n") if progress_bits else ""
             prev_digest = digest
 
             decision = _decide(shot, goal, history, progress)
@@ -450,6 +532,17 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                 continue
 
             if action == "click":
+                click_streak += 1
+                if click_streak >= CLICK_STREAK_FAIL:
+                    print(f"Stuck on click streak: {click_streak}")
+                    return _result(
+                        "Failed: too many clicks in a row without typing or finishing.",
+                        shot,
+                        "fail",
+                        step,
+                        started,
+                        actions,
+                    )
                 x, y = decision["x"], decision["y"]
                 last_click = (x, y)
                 focused = _click_for_focus(page, x, y)
@@ -466,8 +559,16 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                 continue
 
             if action == "type":
+                click_streak = 0
+                no_change_clicks = 0
                 if not _editable_focused(page) and last_click is not None:
                     _click_for_focus(page, last_click[0], last_click[1])
+                if not _editable_focused(page):
+                    _focus_visible_editable(
+                        page,
+                        last_click[0] if last_click else None,
+                        last_click[1] if last_click else None,
+                    )
                 if not _editable_focused(page):
                     history.append(
                         f"{step}. type skipped — no text field focused; "
@@ -491,6 +592,9 @@ def run_ui_goal(url: str, goal: str, cancel=None) -> dict:
                 page.wait_for_timeout(800)
                 continue
 
+            click_streak = 0
+            if action in {"press", "scroll", "wait"}:
+                no_change_clicks = 0
             history.append(f"{step}. {action} {note}")
             if action == "press":
                 page.keyboard.press(decision["key"] or "Enter")
